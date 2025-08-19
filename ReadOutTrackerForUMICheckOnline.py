@@ -106,6 +106,7 @@ class CSVLogger:
         Initialize CSV files for multiple trackers.
         """
         try:
+            
             # Create base directory if it doesn't exist
             os.makedirs(self.base_dir, exist_ok=True)
             
