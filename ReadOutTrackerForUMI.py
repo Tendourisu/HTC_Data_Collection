@@ -435,17 +435,29 @@ def main():
     plot_3d = False # live 3D plot (might affect performance)
     plot_t_xyz = False # live plot of x, y, z positions
     log_data = True # log data to CSV file
-    print_data = True # print data to console
+    print_data = False # print data to console
 
     if not vr_manager.initialize_vr_system():
         return
 
-    # Check for connected trackers
-    tracker_indices = vr_manager.get_connected_trackers()
-    print(f"Found {len(tracker_indices)} trackers: {tracker_indices}")
+    # Wait for VR system to fully initialize and detect all trackers
+    print("Waiting for VR system to detect all trackers...")
+    time.sleep(2)  # Give VR system time to detect all devices
+    
+    # Check for connected trackers with retry mechanism
+    max_retries = 5
+    for attempt in range(max_retries):
+        tracker_indices = vr_manager.get_connected_trackers()
+        print(f"Attempt {attempt + 1}: Found {len(tracker_indices)} trackers: {tracker_indices}")
+        
+        if len(tracker_indices) == 3:
+            break
+        elif attempt < max_retries - 1:
+            print(f"Waiting for more trackers... (attempt {attempt + 1}/{max_retries})")
+            time.sleep(1)
     
     if len(tracker_indices) != 3:
-        print(f"Error: Expected 3 trackers, but found {len(tracker_indices)}")
+        print(f"Error: Expected 3 trackers, but found {len(tracker_indices)} after {max_retries} attempts")
         vr_manager.shutdown_vr_system()
         return
 
