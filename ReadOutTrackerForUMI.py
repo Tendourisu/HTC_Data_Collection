@@ -9,6 +9,8 @@ from collections import deque
 from mpl_toolkits.mplot3d import Axes3D
 import os
 from datetime import datetime
+import msvcrt
+import sys
 
 # Define the sampling rate (in Hz)
 SAMPLING_RATE = 120 
@@ -87,14 +89,14 @@ class VRSystemManager:
             openvr.shutdown()
 
 class CSVLogger:
-    def __init__(self):
+    def __init__(self, base_dir: str = "data"):
         """
         Initialize the CSV logger.
         """
         self.files = {}
         self.csv_writers = {}
         self.frame_counters = {}
-        self.base_dir = "data"
+        self.base_dir = base_dir
 
     def init_csv(self, tracker_indices):
         """
@@ -297,6 +299,9 @@ class CSVLogger:
         for file in self.files.values():
             if file:
                 file.close()
+        print("Closed all CSV files: " + ", ".join([f.name for f in self.files.values() if f]))
+        current_num_demos = len(os.listdir(self.base_dir)) if os.path.exists(self.base_dir) else 0
+        print(f"Total number of demo sessions recorded: {current_num_demos}")
 
 class DataConverter:
     @staticmethod
@@ -428,7 +433,12 @@ class LivePlotter:
 
 def main():
     vr_manager = VRSystemManager()
-    csv_logger = CSVLogger()
+    if len(sys.argv) > 1:
+        base_dir = sys.argv[1]
+        print(f"Using custom base directory for data: {base_dir}")
+    else:
+        base_dir = "data"
+    csv_logger = CSVLogger(base_dir=base_dir)
     plotter = LivePlotter()
 
     # enable or disable plots (for maximum performance disable all plots)
@@ -441,7 +451,7 @@ def main():
         return
 
     # Wait for VR system to fully initialize and detect all trackers
-    print("Waiting for VR system to detect all trackers...")
+    print("Waiting for VR system to detect all trackers...\n")
     time.sleep(2)  # Give VR system time to detect all devices
     
     # Check for connected trackers with retry mechanism
@@ -461,35 +471,51 @@ def main():
         vr_manager.shutdown_vr_system()
         return
 
-    if log_data and not csv_logger.init_csv(tracker_indices):
-        return
-
-    if plot_t_xyz: plotter.init_live_plot()
-    if plot_3d: plotter.init_3d_plot()
+    is_recording = False
+    print("Press 's' to start recording, 't' to stop recording, and 'Ctrl+c' quit.\n")
 
     try:
         while True:
-            poses = vr_manager.get_tracker_data()
-            for i in range(openvr.k_unMaxTrackedDeviceCount):
-                if poses[i].bPoseIsValid:
-                    device_class = vr_manager.vr_system.getTrackedDeviceClass(i)
-                    if device_class == openvr.TrackedDeviceClass_GenericTracker:
-                        current_time = time.time()
-                        position = DataConverter.convert_to_quaternion(poses[i].mDeviceToAbsoluteTracking)
-                        tracker_number = i - 1  # Convert to 0, 1, 2
-                        
-                        if plot_t_xyz: plotter.update_live_plot(position[:3])
-                        if plot_3d: plotter.update_3d_plot(position[:3])
-                        if log_data: csv_logger.log_data_csv(tracker_number, current_time, position)
-                        if print_data: print(f"Tracker {tracker_number}: {position}")
+            if is_recording:
+                poses = vr_manager.get_tracker_data()
+                for i in range(openvr.k_unMaxTrackedDeviceCount):
+                    if poses[i].bPoseIsValid:
+                        device_class = vr_manager.vr_system.getTrackedDeviceClass(i)
+                        if device_class == openvr.TrackedDeviceClass_GenericTracker:
+                            current_time = time.time()
+                            position = DataConverter.convert_to_quaternion(poses[i].mDeviceToAbsoluteTracking)
+                            tracker_number = i - 1  # Convert to 0, 1, 2
+                            
+                            if plot_t_xyz: plotter.update_live_plot(position[:3])
+                            if plot_3d: plotter.update_3d_plot(position[:3])
+                            if log_data: csv_logger.log_data_csv(tracker_number, current_time, position)
+                            if print_data: print(f"Tracker {tracker_number}: {position}")
+
+            if msvcrt.kbhit():
+                key = msvcrt.getch()
+                if key == b's' and not is_recording:
+                    is_recording = True
+                    print("Started recording...\n")
+                    if log_data: csv_logger.init_csv(tracker_indices)
+                    if plot_t_xyz: plotter.init_live_plot()
+                    if plot_3d: plotter.init_3d_plot()
+                    print("Press 't' to stop recording, and 'Ctrl+c' to quit.\n")
+                elif key == b't' and is_recording:
+                    is_recording = False
+                    print("Stopped recording...\n")
+                    if log_data: 
+                        csv_logger.check_consistency()
+                        csv_logger.close_csv()
+                    print("Press 's' to start recording again, and 'Ctrl+c' to quit.\n")
+
             precise_wait(1 / SAMPLING_RATE)
     except KeyboardInterrupt:
-        print("Stopping data collection...")
+        print("Stopping data collection...\n")
     finally:
-        if log_data:
-            csv_logger.check_consistency()
         vr_manager.shutdown_vr_system()
-        csv_logger.close_csv()
+        if log_data and is_recording:
+            csv_logger.check_consistency()
+            csv_logger.close_csv()
 
 
 if __name__ == "__main__":
